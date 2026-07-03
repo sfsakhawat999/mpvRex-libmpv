@@ -69,13 +69,13 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
             val h = event.getAxisValue(MotionEvent.AXIS_HSCROLL)
             val v = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
             if (h > 0)
-                MPVLib.command(arrayOf("keypress", "WHEEL_RIGHT", "$h"))
+                MPVLib.command(*arrayOf("keypress", "WHEEL_RIGHT", "$h"))
             else if (h < 0)
-                MPVLib.command(arrayOf("keypress", "WHEEL_LEFT", "${-h}"))
+                MPVLib.command(*arrayOf("keypress", "WHEEL_LEFT", "${-h}"))
             if (v > 0)
-                MPVLib.command(arrayOf("keypress", "WHEEL_UP", "$v"))
+                MPVLib.command(*arrayOf("keypress", "WHEEL_UP", "$v"))
             else if (v < 0)
-                MPVLib.command(arrayOf("keypress", "WHEEL_DOWN", "${-v}"))
+                MPVLib.command(*arrayOf("keypress", "WHEEL_DOWN", "${-v}"))
             return true
         }
         return false
@@ -87,7 +87,7 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
         if (KeyEvent.isModifierKey(event.keyCode))
             return false
 
-        var mapped = keyMapping[event.keyCode]
+        var mapped = KeyMapping[event.keyCode]
         if (mapped == null) {
             // Fallback to produced glyph
             if (!event.isPrintingKey) {
@@ -113,7 +113,7 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
 
         val action = if (event.action == KeyEvent.ACTION_DOWN) "keydown" else "keyup"
         mod.add(mapped)
-        MPVLib.command(arrayOf(action, mod.joinToString("+")))
+        MPVLib.command(*arrayOf(action, mod.joinToString("+")))
 
         return true
     }
@@ -292,10 +292,10 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
 
     // Commands
 
-    fun cyclePause() = MPVLib.command(arrayOf("cycle", "pause"))
-    fun cycleAudio() = MPVLib.command(arrayOf("cycle", "audio"))
-    fun cycleSub() = MPVLib.command(arrayOf("cycle", "sub"))
-    fun cycleHwdec() = MPVLib.command(arrayOf("cycle-values", "hwdec", HWDECS, "no"))
+    fun cyclePause() = MPVLib.command(*arrayOf("cycle", "pause"))
+    fun cycleAudio() = MPVLib.command(*arrayOf("cycle", "audio"))
+    fun cycleSub() = MPVLib.command(*arrayOf("cycle", "sub"))
+    fun cycleHwdec() = MPVLib.command(*arrayOf("cycle-values", "hwdec", HWDECS, "no"))
 
     fun cycleSpeed() {
         val speeds = arrayOf(0.5, 0.75, 1.0, 1.25, 1.5, 1.75, 2.0)
@@ -334,7 +334,7 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
         val newState = if (cycle) state.xor(value) else value
         if (state == newState)
             return
-        MPVLib.command(arrayOf(if (newState) "playlist-shuffle" else "playlist-unshuffle"))
+        MPVLib.command(*arrayOf(if (newState) "playlist-shuffle" else "playlist-unshuffle"))
         MPVLib.setPropertyBoolean("shuffle", newState)
     }
 

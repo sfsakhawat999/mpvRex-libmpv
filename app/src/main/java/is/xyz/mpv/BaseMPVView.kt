@@ -87,7 +87,7 @@ abstract class BaseMPVView(context: Context, attrs: AttributeSet) : SurfaceView(
         MPVLib.setOptionString("force-window", "yes")
 
         if (filePath != null) {
-            MPVLib.command(arrayOf("loadfile", filePath as String))
+            MPVLib.command(*arrayOf("loadfile", filePath as String))
             filePath = null
         } else {
             // We disable video output when the context disappears, enable it back
