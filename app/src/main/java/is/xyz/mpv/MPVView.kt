@@ -3,7 +3,6 @@ package `is`.xyz.mpv
 import android.content.Context
 import android.os.Build
 import android.os.Environment
-import android.preference.PreferenceManager
 import android.util.AttributeSet
 import android.util.Log
 import android.view.*
@@ -17,22 +16,14 @@ import kotlin.reflect.KProperty
 
 internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(context, attrs) {
     override fun initOptions() {
-        val sharedPreferences = PreferenceManager.getDefaultSharedPreferences(context)
-
         // apply phone-optimized defaults
         MPVLib.setOptionString("profile", "fast")
 
         // vo
-        setVo(if (sharedPreferences.getBoolean("gpu_next", false))
-            "gpu-next"
-        else
-            "gpu")
+        setVo("gpu")
 
         // hwdec
-        val hwdec = if (sharedPreferences.getBoolean("hardware_decoding", true))
-            HWDECS
-        else
-            "no"
+        MPVLib.setOptionString("hwdec", HWDECS)
 
         // vo: set display fps as reported by android
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
@@ -46,68 +37,22 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
                        "(${Build.VERSION.SDK_INT} < ${Build.VERSION_CODES.M})")
         }
 
-        // set non-complex options
-        data class Property(val preferenceName: String, val mpvOption: String)
-        val opts = arrayOf(
-                Property("default_audio_language", "alang"),
-                Property("default_subtitle_language", "slang"),
-
-                // vo-related
-                Property("video_scale", "scale"),
-                Property("video_scale_param1", "scale-param1"),
-                Property("video_scale_param2", "scale-param2"),
-
-                Property("video_downscale", "dscale"),
-                Property("video_downscale_param1", "dscale-param1"),
-                Property("video_downscale_param2", "dscale-param2"),
-
-                Property("video_tscale", "tscale"),
-                Property("video_tscale_param1", "tscale-param1"),
-                Property("video_tscale_param2", "tscale-param2")
-        )
-
-        for ((preferenceName, mpvOption) in opts) {
-            val preference = sharedPreferences.getString(preferenceName, "")
-            if (!preference.isNullOrBlank())
-                MPVLib.setOptionString(mpvOption, preference)
-        }
-
-        val debandMode = sharedPreferences.getString("video_debanding", "")
-        if (debandMode == "gradfun") {
-            // lower the default radius (16) to improve performance
-            MPVLib.setOptionString("vf", "gradfun=radius=12")
-        } else if (debandMode == "gpu") {
-            MPVLib.setOptionString("deband", "yes")
-        }
-
-        val vidsync = sharedPreferences.getString("video_sync", resources.getString(R.string.pref_video_interpolation_sync_default))
-        MPVLib.setOptionString("video-sync", vidsync!!)
-
-        if (sharedPreferences.getBoolean("video_interpolation", false))
-            MPVLib.setOptionString("interpolation", "yes")
-
-        if (sharedPreferences.getBoolean("gpudebug", false))
-            MPVLib.setOptionString("gpu-debug", "yes")
-
-        if (sharedPreferences.getBoolean("video_fastdecode", false)) {
-            MPVLib.setOptionString("vd-lavc-fast", "yes")
-            MPVLib.setOptionString("vd-lavc-skiploopfilter", "nonkey")
-        }
+        MPVLib.setOptionString("video-sync", "audio")
 
         MPVLib.setOptionString("gpu-context", "android")
         MPVLib.setOptionString("opengl-es", "yes")
-        MPVLib.setOptionString("hwdec", hwdec)
         MPVLib.setOptionString("hwdec-codecs", "h264,hevc,mpeg4,mpeg2video,vp8,vp9,av1")
         MPVLib.setOptionString("ao", "audiotrack,opensles")
         MPVLib.setOptionString("audio-set-media-role", "yes")
         MPVLib.setOptionString("tls-verify", "yes")
         MPVLib.setOptionString("tls-ca-file", "${this.context.filesDir.path}/cacert.pem")
         MPVLib.setOptionString("input-default-bindings", "yes")
+        
         // Limit demuxer cache since the defaults are too high for mobile devices
         val cacheMegs = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) 64 else 32
         MPVLib.setOptionString("demuxer-max-bytes", "${cacheMegs * 1024 * 1024}")
         MPVLib.setOptionString("demuxer-max-back-bytes", "${cacheMegs * 1024 * 1024}")
-        //
+        
         val screenshotDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
         screenshotDir.mkdirs()
         MPVLib.setOptionString("screenshot-directory", screenshotDir.path)
@@ -219,7 +164,7 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
         for (list in tracks.values) {
             list.clear()
             // pseudo-track to allow disabling audio/subs
-            list.add(Track(-1, context.getString(R.string.track_off)))
+            list.add(Track(-1, "Off"))
         }
         val count = MPVLib.getPropertyInt("track-list/count")!!
         // Note that because events are async, properties might disappear at any moment
@@ -235,11 +180,11 @@ internal class MPVView(context: Context, attrs: AttributeSet) : BaseMPVView(cont
             val title = MPVLib.getPropertyString("track-list/$i/title")
 
             val trackName = if (!lang.isNullOrEmpty() && !title.isNullOrEmpty())
-                context.getString(R.string.ui_track_title_lang, mpvId, title, lang)
+                "Track $mpvId: $title ($lang)"
             else if (!lang.isNullOrEmpty() || !title.isNullOrEmpty())
-                context.getString(R.string.ui_track_text, mpvId, (lang ?: "") + (title ?: ""))
+                "Track $mpvId: ${(lang ?: "") + (title ?: "")}"
             else
-                context.getString(R.string.ui_track, mpvId)
+                "Track $mpvId"
             tracks.getValue(type).add(Track(
                     mpvId=mpvId,
                     name=trackName
