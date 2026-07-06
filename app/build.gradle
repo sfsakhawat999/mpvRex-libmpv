@@ -8,6 +8,10 @@ android {
     defaultConfig {
         minSdkVersion 24
     }
+
+    publishing {
+        singleVariant('release')
+    }
 }
 
 dependencies {
