@@ -1,2 +1,12 @@
 jdk:
   - openjdk17
+before_install:
+  - sudo apt-get update
+  - sudo apt-get install -y autoconf pkg-config pkgconf libtool ninja-build python3-pip gperf nasm
+  - sudo pip3 install meson --break-system-packages || sudo pip3 install meson
+  - cd buildscripts && ./download.sh
+  - cd buildscripts && ./buildall.sh --arch arm64 mpv
+  - cd buildscripts && ./buildall.sh --arch armv7l mpv
+  - cd buildscripts && ./buildall.sh --arch x86 mpv
+  - cd buildscripts && ./buildall.sh --arch x86_64 mpv
+  - cd buildscripts && ./scripts/write_versions.sh arm64
