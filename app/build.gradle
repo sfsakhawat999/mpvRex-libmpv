@@ -26,7 +26,12 @@ afterEvaluate {
                 from components.release
                 groupId = 'com.github.sfsakhawat999'
                 artifactId = 'mpvRex-libmpv'
-                version = 'v0.0.1'
+                version = System.getenv("VERSION_TAG") ?: 'v0.0.3'
+            }
+        }
+        repositories {
+            maven {
+                url = layout.buildDirectory.dir("repo")
             }
         }
     }
