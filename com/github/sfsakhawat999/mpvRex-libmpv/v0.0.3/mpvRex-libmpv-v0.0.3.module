@@ -1,0 +1,74 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.github.sfsakhawat999",
+    "module": "mpvRex-libmpv",
+    "version": "v0.0.3",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.3.1"
+    }
+  },
+  "variants": [
+    {
+      "name": "releaseVariantReleaseApiPublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-api"
+      },
+      "files": [
+        {
+          "name": "mpvRex-libmpv-v0.0.3.aar",
+          "url": "mpvRex-libmpv-v0.0.3.aar",
+          "size": 80134656,
+          "sha512": "ae5bd8d8e0e80b31f83a9565013e604a7551d43e9f15dcd1ca782cc380a57f7d7e6fb31a0e455c33bcb57499938df2fcbfa7a67f14d9de469e708b2b08867ce2",
+          "sha256": "5be53c2c94c3dbf7c830a43a945b0c1de17a52971098c9a3505f02406a6694a8",
+          "sha1": "b8dd839780aa61ffeced2a8659a06ae783fc1bda",
+          "md5": "b31996bc6e88a3c24fece7898e48a60e"
+        }
+      ]
+    },
+    {
+      "name": "releaseVariantReleaseRuntimePublication",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.libraryelements": "aar",
+        "org.gradle.usage": "java-runtime"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.2.21"
+          }
+        },
+        {
+          "group": "androidx.core",
+          "module": "core-ktx",
+          "version": {
+            "requires": "1.13.1"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mpvRex-libmpv-v0.0.3.aar",
+          "url": "mpvRex-libmpv-v0.0.3.aar",
+          "size": 80134656,
+          "sha512": "ae5bd8d8e0e80b31f83a9565013e604a7551d43e9f15dcd1ca782cc380a57f7d7e6fb31a0e455c33bcb57499938df2fcbfa7a67f14d9de469e708b2b08867ce2",
+          "sha256": "5be53c2c94c3dbf7c830a43a945b0c1de17a52971098c9a3505f02406a6694a8",
+          "sha1": "b8dd839780aa61ffeced2a8659a06ae783fc1bda",
+          "md5": "b31996bc6e88a3c24fece7898e48a60e"
+        }
+      ]
+    }
+  ]
+}
