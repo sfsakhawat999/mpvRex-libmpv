@@ -25,6 +25,7 @@ extern "C" {
 extern "C" {
     jni_func(jobject, grabThumbnail, jint dimension);
     jni_func(jobject, grabThumbnailFast, jstring jpath, jdouble position, jint dimension, jboolean use_hw_dec);
+    jni_func(jobject, grabAttachedPicture, jstring jpath, jint dimension);
     jni_func(void, setThumbnailJavaVM, jobject appctx);
     jni_func(void, clearThumbnailCache);
 };
@@ -602,5 +603,172 @@ jni_func(jobject, grabThumbnailFast, jstring jpath, jdouble position, jint dimen
     }
     
     ALOGI("Thumbnail | %lldms", (long long)total_duration.count());
+    return bitmap;
+}
+
+// ============================================================================
+// ATTACHED PICTURE EXTRACTION (cover art / embedded thumbnail)
+// Two passes:
+//   1. Streams with AV_DISPOSITION_ATTACHED_PIC — MP4 covr, MP3 APIC,
+//      and MKV cover art that FFmpeg auto-recognizes as a synthetic
+//      single-frame video stream.
+//   2. AVMEDIA_TYPE_ATTACHMENT streams with an image/* mimetype — the
+//      genuine Matroska attachment case produced by
+//      `yt-dlp --embed-thumbnail --merge-output-format mkv`.
+// No seeking, no frame decoding loop — just decode the one attached packet.
+// ============================================================================
+
+static jobject decode_attached_picture(
+    JNIEnv *env,
+    const uint8_t *data,
+    int size,
+    AVCodecID codec_id,
+    int dimension
+) {
+    const AVCodec *codec = get_cached_codec(codec_id);
+    if (!codec) {
+        ALOGD("AttachedPic | No decoder for codec_id=%d", (int)codec_id);
+        return NULL;
+    }
+
+    AVCodecContext *codec_ctx = avcodec_alloc_context3(codec);
+    if (!codec_ctx) return NULL;
+
+    codec_ctx->thread_count = 1;
+    codec_ctx->flags2 |= AV_CODEC_FLAG2_FAST;
+
+    if (avcodec_open2(codec_ctx, codec, NULL) < 0) {
+        avcodec_free_context(&codec_ctx);
+        return NULL;
+    }
+
+    AVPacket *pkt = av_packet_alloc();
+    AVFrame *frame = av_frame_alloc();
+    jobject bm = NULL;
+
+    if (pkt && frame) {
+        // Wrap the caller's buffer without copying; the decoder only reads it.
+        pkt->data = const_cast<uint8_t*>(data);
+        pkt->size = size;
+
+        if (avcodec_send_packet(codec_ctx, pkt) >= 0) {
+            // Signal EOF so single-frame image decoders (mjpeg/png/…) flush.
+            avcodec_send_packet(codec_ctx, NULL);
+            if (avcodec_receive_frame(codec_ctx, frame) >= 0) {
+                bm = frame_to_bitmap(env, frame, dimension);
+            }
+        }
+    }
+
+    if (frame) av_frame_free(&frame);
+    if (pkt) {
+        pkt->data = NULL;
+        pkt->size = 0;
+        av_packet_free(&pkt);
+    }
+    avcodec_free_context(&codec_ctx);
+    return bm;
+}
+
+jni_func(jobject, grabAttachedPicture, jstring jpath, jint dimension) {
+    auto total_start = std::chrono::high_resolution_clock::now();
+
+    std::lock_guard<std::mutex> lock(g_thumb_mutex);
+    init_methods_cache(env);
+
+    if (dimension <= 0 || dimension > 4096) {
+        ALOGE("AttachedPic | Invalid dimension");
+        return NULL;
+    }
+
+    const char *path = env->GetStringUTFChars(jpath, NULL);
+    if (!path) {
+        ALOGE("AttachedPic | Invalid path");
+        return NULL;
+    }
+
+    AVFormatContext *format_ctx = NULL;
+    if (avformat_open_input(&format_ctx, path, NULL, NULL) < 0) {
+        ALOGE("AttachedPic | Failed to open file");
+        env->ReleaseStringUTFChars(jpath, path);
+        return NULL;
+    }
+    env->ReleaseStringUTFChars(jpath, path);
+
+    // Minimal probe — same numbers as grabThumbnailFast
+    format_ctx->max_analyze_duration = 100000;
+    format_ctx->probesize = 500000;
+
+    if (avformat_find_stream_info(format_ctx, NULL) < 0) {
+        ALOGE("AttachedPic | Failed to find stream info");
+        avformat_close_input(&format_ctx);
+        return NULL;
+    }
+
+    jobject bitmap = NULL;
+
+    // Pass 1: AV_DISPOSITION_ATTACHED_PIC — the canonical cover-art case
+    for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
+        AVStream *stream = format_ctx->streams[i];
+        if (!(stream->disposition & AV_DISPOSITION_ATTACHED_PIC)) continue;
+
+        AVPacket *pic = &stream->attached_pic;
+        if (!pic->data || pic->size <= 0) continue;
+
+        bitmap = decode_attached_picture(
+            env, pic->data, pic->size, stream->codecpar->codec_id, dimension
+        );
+        if (bitmap) {
+            ALOGI("AttachedPic | ATTACHED_PIC hit (codec_id=%d)",
+                  (int)stream->codecpar->codec_id);
+            break;
+        }
+    }
+
+    // Pass 2: AVMEDIA_TYPE_ATTACHMENT with image/* mimetype — MKV attachments
+    if (!bitmap) {
+        for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
+            AVStream *stream = format_ctx->streams[i];
+            AVCodecParameters *par = stream->codecpar;
+            if (par->codec_type != AVMEDIA_TYPE_ATTACHMENT) continue;
+
+            // Prefer explicit mimetype; fall back to codec_id sniff.
+            AVDictionaryEntry *mime = av_dict_get(stream->metadata, "mimetype", NULL, 0);
+            bool is_image = false;
+            if (mime && mime->value) {
+                is_image = strncmp(mime->value, "image/", 6) == 0;
+            } else {
+                AVCodecID id = par->codec_id;
+                is_image = (id == AV_CODEC_ID_MJPEG || id == AV_CODEC_ID_PNG ||
+                            id == AV_CODEC_ID_WEBP  || id == AV_CODEC_ID_BMP  ||
+                            id == AV_CODEC_ID_GIF);
+            }
+            if (!is_image) continue;
+            if (!par->extradata || par->extradata_size <= 0) continue;
+
+            bitmap = decode_attached_picture(
+                env, par->extradata, par->extradata_size, par->codec_id, dimension
+            );
+            if (bitmap) {
+                ALOGI("AttachedPic | ATTACHMENT hit (codec_id=%d, mimetype=%s)",
+                      (int)par->codec_id,
+                      (mime && mime->value) ? mime->value : "unknown");
+                break;
+            }
+        }
+    }
+
+    avformat_close_input(&format_ctx);
+
+    auto total_end = std::chrono::high_resolution_clock::now();
+    auto total_duration =
+        std::chrono::duration_cast<std::chrono::milliseconds>(total_end - total_start);
+
+    if (bitmap) {
+        ALOGI("AttachedPic | %lldms", (long long)total_duration.count());
+    } else {
+        ALOGD("AttachedPic | none (%lldms)", (long long)total_duration.count());
+    }
+
     return bitmap;
 }

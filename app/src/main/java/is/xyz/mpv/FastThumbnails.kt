@@ -138,6 +138,58 @@ object FastThumbnails {
     }
     
     /**
+     * Extract the embedded/attached picture (cover art / thumbnail) from a
+     * media container without seeking any video frames.
+     *
+     * Covers three container conventions in one call:
+     *   - ID3v2 APIC frames (MP3)
+     *   - MP4 `covr` atoms (MP4/M4A/M4V)
+     *   - Matroska attachments (MKV — including files produced by
+     *     `yt-dlp --embed-thumbnail --merge-output-format mkv`, which
+     *     Android's stock MediaMetadataRetriever frequently misses)
+     *
+     * Returns null if the file has no attached picture — callers should
+     * fall back to frame-seeking in that case.
+     *
+     * @param path File path or URL
+     * @param dimension Max dimension for the longest side (default: 512)
+     * @return Bitmap of the embedded picture, or null if none is present
+     * @throws IllegalStateException if not initialized
+     */
+    @JvmStatic
+    @JvmOverloads
+    fun getEmbeddedPicture(
+        path: String,
+        dimension: Int = 512
+    ): Bitmap? {
+        check(initialized.get()) {
+            "FastThumbnails not initialized. Call initialize(context) first."
+        }
+
+        require(dimension in 1..4096) {
+            "Dimension must be between 1 and 4096 (got $dimension)"
+        }
+
+        return try {
+            MPVLib.grabAttachedPicture(path, dimension)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            null
+        }
+    }
+
+    /**
+     * Extract the embedded/attached picture asynchronously (IO dispatcher).
+     * See [getEmbeddedPicture] for semantics.
+     */
+    suspend fun getEmbeddedPictureAsync(
+        path: String,
+        dimension: Int = 512
+    ): Bitmap? = withContext(Dispatchers.IO) {
+        getEmbeddedPicture(path, dimension)
+    }
+
+    /**
      * Performance benchmark helper.
      * Generates a thumbnail and measures time taken.
      * 
