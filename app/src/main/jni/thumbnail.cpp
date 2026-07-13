@@ -707,7 +707,57 @@ jni_func(jobject, grabAttachedPicture, jstring jpath, jint dimension) {
 
     jobject bitmap = NULL;
 
-    // Pass 1: AV_DISPOSITION_ATTACHED_PIC — the canonical cover-art case
+    // Diagnostic: dump every stream so we can tell what a container actually
+    // carries when a real-world file doesn't match our expectations.
+    for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
+        AVStream *stream = format_ctx->streams[i];
+        AVCodecParameters *par = stream->codecpar;
+        AVDictionaryEntry *mime = av_dict_get(stream->metadata, "mimetype", NULL, 0);
+        AVDictionaryEntry *fname = av_dict_get(stream->metadata, "filename", NULL, 0);
+        ALOGD("AttachedPic | stream[%u] type=%d codec=%s disp=0x%x extradata=%d attached_pic=%d mime=%s filename=%s",
+              i, (int)par->codec_type,
+              avcodec_get_name(par->codec_id),
+              stream->disposition,
+              par->extradata_size,
+              stream->attached_pic.size,
+              (mime && mime->value) ? mime->value : "-",
+              (fname && fname->value) ? fname->value : "-");
+    }
+
+    // Ordered list of image decoders to fall back through when the stream's
+    // codec_id is unknown or its declared codec fails to decode.
+    static const AVCodecID FALLBACK_IMAGE_CODECS[] = {
+        AV_CODEC_ID_MJPEG,
+        AV_CODEC_ID_PNG,
+        AV_CODEC_ID_WEBP,
+        AV_CODEC_ID_BMP,
+        AV_CODEC_ID_GIF,
+    };
+    constexpr int FALLBACK_COUNT =
+        sizeof(FALLBACK_IMAGE_CODECS) / sizeof(FALLBACK_IMAGE_CODECS[0]);
+
+    auto try_decode_all = [&](const uint8_t *data, int size, AVCodecID declared) -> jobject {
+        if (!data || size <= 0) return NULL;
+        // Try the declared codec first if it's plausible.
+        if (declared != AV_CODEC_ID_NONE) {
+            jobject bm = decode_attached_picture(env, data, size, declared, dimension);
+            if (bm) return bm;
+        }
+        // Then walk the fallback list, skipping the one we already tried.
+        for (int i = 0; i < FALLBACK_COUNT; i++) {
+            if (FALLBACK_IMAGE_CODECS[i] == declared) continue;
+            jobject bm = decode_attached_picture(
+                env, data, size, FALLBACK_IMAGE_CODECS[i], dimension
+            );
+            if (bm) return bm;
+        }
+        return NULL;
+    };
+
+    // Pass 1: AV_DISPOSITION_ATTACHED_PIC — canonical cover-art case.
+    // Covers MP4 covr, MP3 APIC, Ogg/Opus METADATA_BLOCK_PICTURE (FFmpeg
+    // auto-lifts it into a synthetic video stream), and any container where
+    // yt-dlp attached the picture via `-disposition:v:N attached_pic`.
     for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
         AVStream *stream = format_ctx->streams[i];
         if (!(stream->disposition & AV_DISPOSITION_ATTACHED_PIC)) continue;
@@ -715,44 +765,61 @@ jni_func(jobject, grabAttachedPicture, jstring jpath, jint dimension) {
         AVPacket *pic = &stream->attached_pic;
         if (!pic->data || pic->size <= 0) continue;
 
-        bitmap = decode_attached_picture(
-            env, pic->data, pic->size, stream->codecpar->codec_id, dimension
-        );
+        bitmap = try_decode_all(pic->data, pic->size, stream->codecpar->codec_id);
         if (bitmap) {
-            ALOGI("AttachedPic | ATTACHED_PIC hit (codec_id=%d)",
-                  (int)stream->codecpar->codec_id);
+            ALOGI("AttachedPic | ATTACHED_PIC hit stream[%u] codec=%s",
+                  i, avcodec_get_name(stream->codecpar->codec_id));
             break;
         }
     }
 
-    // Pass 2: AVMEDIA_TYPE_ATTACHMENT with image/* mimetype — MKV attachments
+    // Pass 2: AVMEDIA_TYPE_ATTACHMENT — Matroska/WebM attachments (`-attach`).
+    // Take any attachment with extradata and try to decode it as an image.
+    // WebM attachments produced by yt-dlp sometimes come through without a
+    // mimetype tag and with codec_id=NONE, so a strict image-only filter
+    // (like before) would drop them. Better to decode-attempt and let the
+    // decoder tell us whether the bytes are a picture.
     if (!bitmap) {
         for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
             AVStream *stream = format_ctx->streams[i];
             AVCodecParameters *par = stream->codecpar;
             if (par->codec_type != AVMEDIA_TYPE_ATTACHMENT) continue;
-
-            // Prefer explicit mimetype; fall back to codec_id sniff.
-            AVDictionaryEntry *mime = av_dict_get(stream->metadata, "mimetype", NULL, 0);
-            bool is_image = false;
-            if (mime && mime->value) {
-                is_image = strncmp(mime->value, "image/", 6) == 0;
-            } else {
-                AVCodecID id = par->codec_id;
-                is_image = (id == AV_CODEC_ID_MJPEG || id == AV_CODEC_ID_PNG ||
-                            id == AV_CODEC_ID_WEBP  || id == AV_CODEC_ID_BMP  ||
-                            id == AV_CODEC_ID_GIF);
-            }
-            if (!is_image) continue;
             if (!par->extradata || par->extradata_size <= 0) continue;
 
-            bitmap = decode_attached_picture(
-                env, par->extradata, par->extradata_size, par->codec_id, dimension
-            );
+            bitmap = try_decode_all(par->extradata, par->extradata_size, par->codec_id);
             if (bitmap) {
-                ALOGI("AttachedPic | ATTACHMENT hit (codec_id=%d, mimetype=%s)",
-                      (int)par->codec_id,
-                      (mime && mime->value) ? mime->value : "unknown");
+                AVDictionaryEntry *mime = av_dict_get(stream->metadata, "mimetype", NULL, 0);
+                ALOGI("AttachedPic | ATTACHMENT hit stream[%u] codec=%s mime=%s",
+                      i, avcodec_get_name(par->codec_id),
+                      (mime && mime->value) ? mime->value : "-");
+                break;
+            }
+        }
+    }
+
+    // Pass 3: raw magic-byte sniff on any stream's extradata. Defensive
+    // catch-all for containers where FFmpeg preserved the raw JPEG/PNG/WebP
+    // bytes on some non-attachment stream (rare, but zero-cost to check).
+    if (!bitmap) {
+        for (unsigned int i = 0; i < format_ctx->nb_streams; i++) {
+            AVCodecParameters *par = format_ctx->streams[i]->codecpar;
+            if (!par->extradata || par->extradata_size < 8) continue;
+            if (par->codec_type == AVMEDIA_TYPE_ATTACHMENT) continue; // handled in Pass 2
+
+            const uint8_t *d = par->extradata;
+            bool looks_image =
+                (d[0] == 0xFF && d[1] == 0xD8 && d[2] == 0xFF) ||                       // JPEG
+                (d[0] == 0x89 && d[1] == 'P' && d[2] == 'N' && d[3] == 'G') ||          // PNG
+                (d[0] == 'R'  && d[1] == 'I' && d[2] == 'F' && d[3] == 'F' &&
+                 d[8] == 'W' && d[9] == 'E' && d[10]== 'B' && d[11]== 'P') ||           // WebP
+                (d[0] == 'B'  && d[1] == 'M') ||                                        // BMP
+                (d[0] == 'G'  && d[1] == 'I' && d[2] == 'F' && d[3] == '8');            // GIF
+            if (!looks_image) continue;
+
+            bitmap = try_decode_all(par->extradata, par->extradata_size, par->codec_id);
+            if (bitmap) {
+                ALOGI("AttachedPic | MAGIC hit stream[%u] type=%d codec=%s",
+                      i, (int)par->codec_type, avcodec_get_name(par->codec_id));
                 break;
             }
         }
