@@ -12,10 +12,7 @@ buildscript {
 }
 
 
-// Use `./gradlew wrapper` to re-generate it
-tasks {
-    wrapper {
-        gradleVersion = "9.3.1"
-        distributionType = Wrapper.DistributionType.BIN
-    }
+wrapper {
+    gradleVersion = '9.3.1'
+    distributionType = Wrapper.DistributionType.BIN
 }
