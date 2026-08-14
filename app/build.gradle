@@ -30,9 +30,7 @@ afterEvaluate {
             }
         }
         repositories {
-            maven {
-                setUrl(layout.buildDirectory.dir("repo"))
-            }
+            mavenLocal()
         }
     }
 }
