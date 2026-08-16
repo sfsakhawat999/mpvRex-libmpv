@@ -26,6 +26,10 @@ END
 
 unset CC CXX # meson wants these unset
 
+if [ -f "$DIR/patches/mpv-shaders.patch" ]; then
+	patch -p1 -N --dry-run < "$DIR/patches/mpv-shaders.patch" >/dev/null 2>&1 && patch -p1 < "$DIR/patches/mpv-shaders.patch" || true
+fi
+
 meson setup $build --cross-file "$prefix_dir"/crossfile.txt \
 	--default-library shared \
 	-Diconv=disabled -Dlua=enabled -Dvulkan=enabled \
