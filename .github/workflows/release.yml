@@ -26,29 +26,23 @@ jobs:
           java-version: '17'
           distribution: temurin
 
-      - name: Export env vars
-        run: buildscripts/include/ci.sh export >>$GITHUB_ENV
-
-      - uses: actions/cache@v4
+      - name: Cache pre-built native libraries (Prefix)
+        uses: actions/cache@v4
         with:
-          path: gh-cache/
-          key: "prefix-${{ hashFiles('buildscripts/**.sh') }}"
-          restore-keys: "prefix-"
-          enableCrossOsArchive: true
+          path: buildscripts/prefix/
+          key: "release-prefix-v1-${{ hashFiles('buildscripts/include/depinfo.sh', 'buildscripts/scripts/*.sh') }}"
+          restore-keys: "release-prefix-v1-"
 
-      - name: Install deps
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install autoconf pkg-config pkgconf libtool ninja-build python3-pip gperf nasm
           sudo pip3 install meson
 
-      - name: Download deps & Setup Cache
+      - name: Download SDK and dependency sources
         run: |
-          mkdir -p "$CACHE_FOLDER"
-          buildscripts/include/ci.sh install
-        env:
-          CACHE_MODE: "folder"
-          CACHE_FOLDER: "${{ github.workspace }}/gh-cache"
+          cd buildscripts
+          IN_CI=1 ./download.sh > /dev/null
 
       - name: Set version tag
         run: |
@@ -67,11 +61,11 @@ jobs:
           set -x
           unset ANDROID_SDK_ROOT
           cd buildscripts
-          ./buildall.sh -n --arch x86 mpv
-          ./buildall.sh -n --arch x86_64 mpv
-          ./buildall.sh -n --arch arm64 mpv
-          ./buildall.sh -n --arch armv7l mpv
-          ./buildall.sh -n
+          ./buildall.sh --arch x86 mpv
+          ./buildall.sh --arch x86_64 mpv
+          ./buildall.sh --arch arm64 mpv
+          ./buildall.sh --arch armv7l mpv
+          ./buildall.sh
           ./scripts/write_versions.sh arm64
           cd ..
           ./gradlew publishReleasePublicationToMavenRepository
