@@ -6,6 +6,11 @@ on:
       - '*'
 
   workflow_dispatch:
+    inputs:
+      version_tag:
+        description: 'Version to publish (e.g. 0.0.9)'
+        required: true
+        default: '0.0.9'
 
 jobs:
   build:
@@ -24,29 +29,49 @@ jobs:
       - name: Export env vars
         run: buildscripts/include/ci.sh export >>$GITHUB_ENV
 
+      - uses: actions/cache@v4
+        with:
+          path: gh-cache/
+          key: "prefix-${{ hashFiles('buildscripts/**.sh') }}"
+          restore-keys: "prefix-"
+          enableCrossOsArchive: true
+
       - name: Install deps
         run: |
           sudo apt-get update
           sudo apt-get install autoconf pkg-config pkgconf libtool ninja-build python3-pip gperf nasm
           sudo pip3 install meson
 
+      - name: Download deps & Setup Cache
+        run: |
+          mkdir -p "$CACHE_FOLDER"
+          buildscripts/include/ci.sh install
+        env:
+          CACHE_MODE: "folder"
+          CACHE_FOLDER: "${{ github.workspace }}/gh-cache"
 
-      - name: Get tag name
-        if: startsWith(github.ref, 'refs/tags/')
+      - name: Set version tag
         run: |
           set -x
-          echo "VERSION_TAG=${GITHUB_REF/refs\/tags\//}" >> $GITHUB_ENV
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.version_tag }}"
+          elif [[ "$GITHUB_REF" =~ ^refs/tags/ ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+          else
+            TAG="0.0.9"
+          fi
+          echo "VERSION_TAG=$TAG" >> $GITHUB_ENV
 
       - name: Build the release artifacts
         run: |
           set -x
           unset ANDROID_SDK_ROOT
           cd buildscripts
-          ./download.sh > /dev/null
-          ./buildall.sh --arch x86 mpv
-          ./buildall.sh --arch x86_64 mpv
-          ./buildall.sh --arch arm64 mpv
-          ./buildall.sh
+          ./buildall.sh -n --arch x86 mpv
+          ./buildall.sh -n --arch x86_64 mpv
+          ./buildall.sh -n --arch arm64 mpv
+          ./buildall.sh -n --arch armv7l mpv
+          ./buildall.sh -n
           ./scripts/write_versions.sh arm64
           cd ..
           ./gradlew publishReleasePublicationToMavenRepository
@@ -54,7 +79,7 @@ jobs:
           GRADLE_OPTS: -Xmx4G
 
       - name: Publish to GitHub Pages
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         uses: peaceiris/actions-gh-pages@v3
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

@@ -32,7 +32,9 @@ build_prefix() {
 	IN_CI=1 ./include/download-deps.sh
 
 	msg "Compiling"
-	./buildall.sh --only-deps mpv
+	for arch in armv7l arm64 x86 x86_64; do
+		./buildall.sh --arch $arch --only-deps mpv
+	done
 
 	if [[ "$CACHE_MODE" == folder && -w "$CACHE_FOLDER" ]]; then
 		msg "Compressing the prefix"
